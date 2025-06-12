@@ -1,5 +1,3 @@
-# agent.py (Final Hybrid Architecture to handle API inconsistencies)
-
 import json
 import re
 from llm_client import get_llm_response
@@ -115,7 +113,7 @@ def run_agent(user_message: str):
                 except json.JSONDecodeError:
                     error_message = f"Error: The model returned invalid JSON for arguments: {function_args}"
                     print(f"[Agent] {error_message}")
-                    all_results.append(error_message)
+                    all_results.append({function_name: {"success": False, "error": error_message}}) # Error handling
                     continue
 
             print(f"[Agent] Executing: {function_name} with arguments: {function_args}")
@@ -125,28 +123,34 @@ def run_agent(user_message: str):
             if function_to_call:
                 try:
                     result = function_to_call(**function_args)
-                    all_results.append(str(result))
+                    all_results.append({function_name: result})
                 except Exception as e:
-                    all_results.append(f"Error executing function '{function_name}': {e}")
+                    # Append a structured error message
+                    all_results.append({function_name: {"success": False, "error": str(e)}})
             else:
-                all_results.append(f"Error: Unknown function '{function_name}'")
+                # Append a structured error message for unknown function
+                all_results.append({function_name: {"success": False, "error": f"Unknown function '{function_name}'"}})
 
-        return "\n".join(all_results)
+        return all_results
     else:
         print("[Agent] LLM decided to respond with text and no valid tools were found.")
+        # For text responses, return the content directly so the API can wrap it.
         return response_message.get("content", "I couldn't process that request.")
 
 
 if __name__ == "__main__":
     print("--- Starting Agent Test ---")
+    print("--- Starting Agent Test ---")
     # response1 = run_agent("Turn on the lamp in room 1")
     # response1 = run_agent("Turn on all ac units")
     # response1 = run_agent("Hello how are you?")
-    response1 = run_agent("What is today's date?")
+    # response1 = run_agent("What is today's date?")
+    response1 = run_agent("turn on all lamps and who are you?")
     # response1 = run_agent("What is the weather like in Isfahan?")
     # response1 = run_agent("Turn on the light in room 1 and tell me the weather in Tehran and what time is it?")
     # response1 = run_agent("I want to sleep.")
     # response1 = run_agent("I want to sleep. I need a dark and quiet environment.")
     # response1 = run_agent("Tell me some news from china.")
     # response1 = run_agent("I want see football on tv")
+    # response1 = run_agent("What is today's date?")
     print("\n--- Final Response 1 ---\n", response1)

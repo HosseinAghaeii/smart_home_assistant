@@ -20,29 +20,48 @@ DEVICE_MAP = {
 }
 
 
+# def _control_device(device_id: str, value: int, action_name: str):
+#
+#     if device_id not in DEVICE_MAP:
+#         return f"Device '{device_id}' not found."
+#
+#     device_info = DEVICE_MAP[device_id]
+#     slave_id = device_info["slave_id"]
+#     register = device_info["register"]
+#     device_name = device_info["name"]
+#
+#     command = generate_write_command(slave_id, register, value)
+#
+#     if send_modbus_command(command):
+#         print(f"Action: {device_name} was {action_name}.")
+#         return f"{device_name} was successfully {action_name}."
+#     else:
+#         print(f"Error: Failed to {action_name} {device_name}.")
+#         return f"Failed to send command to {device_name}."
+#
+#
+# def turn_on_device(device_id: str):
+#     return _control_device(device_id, ON_VALUE, "turned on")
+#
+#
+# def turn_off_device(device_id: str):
+#     return _control_device(device_id, OFF_VALUE, "turned off")
 def _control_device(device_id: str, value: int, action_name: str):
-
     if device_id not in DEVICE_MAP:
-        return f"Device '{device_id}' not found."
+        return {"success": False, "error": f"Device '{device_id}' not found."}
 
     device_info = DEVICE_MAP[device_id]
-    slave_id = device_info["slave_id"]
-    register = device_info["register"]
-    device_name = device_info["name"]
-
-    command = generate_write_command(slave_id, register, value)
+    command = generate_write_command(device_info["slave_id"], device_info["register"], value)
 
     if send_modbus_command(command):
-        print(f"Action: {device_name} was {action_name}.")
-        return f"{device_name} was successfully {action_name}."
+        print(f"Action: {device_info['name']} was {action_name}.")
+        return {"success": True, "deviceName": device_info['name'], "action": action_name}
     else:
-        print(f"Error: Failed to {action_name} {device_name}.")
-        return f"Failed to send command to {device_name}."
-
+        print(f"Error: Failed to {action_name} {device_info['name']}.")
+        return {"success": False, "error": f"Failed to send command to {device_info['name']}."}
 
 def turn_on_device(device_id: str):
     return _control_device(device_id, ON_VALUE, "turned on")
-
 
 def turn_off_device(device_id: str):
     return _control_device(device_id, OFF_VALUE, "turned off")
@@ -53,14 +72,3 @@ if __name__ == "__main__":
 
     print(turn_on_device("kitchen_lamp"))
     time.sleep(2)
-
-    # print(turn_off_device("kitchen_lamp"))
-    # time.sleep(2)
-    #
-    # print(turn_on_device("room1_ac"))
-    # time.sleep(2)
-    #
-    # print(turn_off_device("room1_ac"))
-    # time.sleep(2)
-
-    # print(turn_on_device("non_existent_device"))
