@@ -1,9 +1,18 @@
 from fastapi import FastAPI, HTTPException
-from agent import run_agent  # ایجنت هوشمند خود را وارد می‌کنیم
+from fastapi.middleware.cors import CORSMiddleware
+from agent import run_agent
 import uvicorn
 from typing import List, Dict, Any
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _format_response(tool_call_name: str, tool_result: dict) -> dict:
