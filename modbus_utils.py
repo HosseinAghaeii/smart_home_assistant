@@ -5,7 +5,7 @@ import time
 import logging
 
 # --- Configuration ---
-SERIAL_PORT = "COM3"
+SERIAL_PORT = "COM6"
 BAUD_RATE = 9600
 PARITY = serial.PARITY_NONE
 STOP_BITS = serial.STOPBITS_ONE

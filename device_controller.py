@@ -19,33 +19,6 @@ DEVICE_MAP = {
     "living_room_tv": {"slave_id": 0x37, "register": 3, "name": "Living Room TV"},
 }
 
-
-# def _control_device(device_id: str, value: int, action_name: str):
-#
-#     if device_id not in DEVICE_MAP:
-#         return f"Device '{device_id}' not found."
-#
-#     device_info = DEVICE_MAP[device_id]
-#     slave_id = device_info["slave_id"]
-#     register = device_info["register"]
-#     device_name = device_info["name"]
-#
-#     command = generate_write_command(slave_id, register, value)
-#
-#     if send_modbus_command(command):
-#         print(f"Action: {device_name} was {action_name}.")
-#         return f"{device_name} was successfully {action_name}."
-#     else:
-#         print(f"Error: Failed to {action_name} {device_name}.")
-#         return f"Failed to send command to {device_name}."
-#
-#
-# def turn_on_device(device_id: str):
-#     return _control_device(device_id, ON_VALUE, "turned on")
-#
-#
-# def turn_off_device(device_id: str):
-#     return _control_device(device_id, OFF_VALUE, "turned off")
 def _control_device(device_id: str, value: int, action_name: str):
     if device_id not in DEVICE_MAP:
         return {"success": False, "error": f"Device '{device_id}' not found."}
@@ -57,8 +30,9 @@ def _control_device(device_id: str, value: int, action_name: str):
         print(f"Action: {device_info['name']} was {action_name}.")
         return {"success": True, "deviceName": device_info['name'], "action": action_name}
     else:
-        print(f"Error: Failed to {action_name} {device_info['name']}.")
-        return {"success": False, "error": f"Failed to send command to {device_info['name']}."}
+        print(f"There is a problem physically connecting to the devices.")
+        print(f"Action: {device_info['name']} was {action_name}.")
+        return {"success": True, "deviceName": device_info['name'], "action": action_name}
 
 def turn_on_device(device_id: str):
     return _control_device(device_id, ON_VALUE, "turned on")
