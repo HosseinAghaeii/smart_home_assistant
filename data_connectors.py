@@ -9,6 +9,7 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 def get_current_weather(city: str = "Tehran", unit: str = "metric"):
+    print(f"call get_current_weather api ...")
     if not OPENWEATHER_API_KEY: return {"success": False, "error": "Weather API Key not set."}
     base_url = "http://api.openweathermap.org/data/2.5/weather"
     params = {"q": city, "appid": OPENWEATHER_API_KEY, "units": unit, "lang": "en"}
@@ -30,10 +31,12 @@ def get_current_weather(city: str = "Tehran", unit: str = "metric"):
         return {"success": False, "error": str(e)}
 
 def get_current_time():
+    print(f"call get_current_time api ...")
     now = datetime.datetime.now()
     return {"success": True, "time": now.strftime('%H:%M:%S')}
 
 def get_current_date():
+    print(f"call get_current_date api ...")
     today = datetime.datetime.now()
     return {
         "success": True,
@@ -45,6 +48,7 @@ def get_current_date():
     }
 
 def get_news_headlines(category: str = "general", country: str = "us"):
+    print(f"call get_news_headlines api ...")
     if not NEWS_API_KEY: return {"success": False, "error": "News API Key not set."}
     base_url = "https://newsapi.org/v2/top-headlines"
     params = {"apiKey": NEWS_API_KEY, "category": category, "country": country, "pageSize": 3}

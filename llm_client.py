@@ -1,7 +1,8 @@
-# llm_client.py (Cleaned and Final Version)
+# llm_client.py (Final Corrected Version)
 
 import os
 import requests
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,25 +10,26 @@ load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-def get_llm_response(messages: list, tools: list = None, preferred_service: str = "togetherai"):
+# <<< KEY CHANGE IS IN THIS FUNCTION DEFINITION >>>
+def get_llm_response(messages: list, tools: list = None, preferred_service: str = "togetherai", temperature: float = 0.7):
     """
-    Calls an LLM API using an OpenAI-compatible interface, supporting tool calls.
+    Calls an LLM API using an OpenAI-compatible interface, supporting tool calls and temperature setting.
     Args:
-        messages: A list of message objects (e.g., [{"role": "system", ...}, {"role": "user", ...}]).
-        tools: An optional list of tool schemas to provide to the model.
+        messages: A list of message objects.
+        tools: An optional list of tool schemas.
         preferred_service: The API service to use ('togetherai' or 'groq').
+        temperature: The sampling temperature for the model.
     Returns:
         The full JSON response from the API as a dictionary, or None on failure.
     """
     if preferred_service == "togetherai":
         api_key = TOGETHER_API_KEY
         url = "https://api.together.xyz/v1/chat/completions"
-        # Using a 70B model is highly recommended for reliable tool calling
-        model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+        model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" # The model you confirmed works well
     elif preferred_service == "groq":
         api_key = GROQ_API_KEY
         url = "https://api.groq.com/openai/v1/chat/completions"
-        model = "llama3-70b-8192"
+        model = "llama3-70b-8192" # Groq works well with the 70B model
     else:
         raise ValueError("Invalid preferred_service. Must be 'groq' or 'togetherai'.")
 
@@ -42,7 +44,7 @@ def get_llm_response(messages: list, tools: list = None, preferred_service: str 
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.1,  # Lower temperature for more deterministic tool use
+        "temperature": temperature, # Now uses the temperature passed to the function
         "max_tokens": 1024,
     }
     if tools:
@@ -55,7 +57,6 @@ def get_llm_response(messages: list, tools: list = None, preferred_service: str 
         return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Error calling {preferred_service} API: {e}")
-        # To see more details on the error from the API provider
         if e.response:
              print(f"Response body: {e.response.text}")
         return None
