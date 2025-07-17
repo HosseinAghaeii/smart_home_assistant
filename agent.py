@@ -1,231 +1,239 @@
 import json
 import re
-import codecs
 from llm_client import get_llm_response
 from device_controller import turn_on_device, turn_off_device
 from data_connectors import get_current_weather, get_current_time, get_current_date, get_news_headlines
+from tools_definition import get_tools_schema
 
-# This list should be defined before TOOLS
-real_device_ids = [
-    "kitchen_lamp", "bathroom_lamp", "room1_lamp", "room2_lamp",
-    "room1_ac", "kitchen_ac", "living_room_tv"
-]
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "turn_on_device",
-            "description": "Turns on a specific device like a lamp, AC unit, or TV.",
-            "parameters": {
-                "type": "object",
-                "properties": {"device_id": {"type": "string", "enum": real_device_ids,
-                                             "description": "Unique identifier for the hardware device."}},
-                "required": ["device_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "turn_off_device",
-            "description": "Turns off a specific device like a lamp, AC unit, or TV.",
-            "parameters": {
-                "type": "object",
-                "properties": {"device_id": {"type": "string", "enum": real_device_ids,
-                                             "description": "Unique identifier for the hardware device."}},
-                "required": ["device_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_weather",
-            "description": "Retrieves current weather information for a specified city.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "city": {"type": "string", "description": "The name of the city, e.g., Tehran"},
-                    "unit": {"type": "string", "enum": ["metric", "imperial"], "description": "Temperature unit. Default is metric (Celsius)."}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "Gets the precise, real-time current time. Use this for any questions about the current time.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_date",
-            "description": "Gets the precise, real-time current date. Use this for any questions about the current date.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_news_headlines",
-            "description": "Retrieves recent news headlines for a given category and country.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "enum": ["business", "entertainment", "general", "health", "science", "sports", "technology"], "description": "The category of news to retrieve."},
-                    "country": {"type": "string", "enum": ["us", "gb", "de", "ir"], "description": "The two-letter ISO 3166-1 code of the country."}
-                }
-            }
-        }
-    }
-]
-
+# Maps the function names from the tool schema to the actual Python functions.
 AVAILABLE_FUNCTIONS = {
-    "turn_on_device": turn_on_device,
-    "turn_off_device": turn_off_device,
-    "get_current_weather": get_current_weather,
-    "get_current_time": get_current_time,
-    "get_current_date": get_current_date,
-    "get_news_headlines": get_news_headlines,
+    "call_turn_on_device": turn_on_device,
+    "call_turn_off_device": turn_off_device,
+    "call_get_current_weather": get_current_weather,
+    "call_get_current_time": get_current_time,
+    "call_get_current_date": get_current_date,
+    "call_get_news_headlines": get_news_headlines,
 }
 
 
-def execute_tool(function_name: str, arguments: dict):
-    print(f"\n--- Calling tool: {function_name} with args: {arguments} ---")
-    function_to_call = AVAILABLE_FUNCTIONS.get(function_name)
-    if not function_to_call:
-        return f"Unknown function: {function_name}"
-    try:
-        return function_to_call(**arguments)
-    except Exception as e:
-        return f"Error executing function {function_name}: {e}"
-
-
-def run_agent(user_message: str):
+def _get_intent(user_message: str, preferred_service: str) -> str:
     """
-    Runs the agent with Chain of Thought (CoT) prompting.
-    This version includes more robust parsing to handle malformed LLM responses.
+    Step 1: The Router.
+    This function classifies the user's intent as either 'tool_use' or 'conversation'.
     """
+    print("[Agent Router] Step 1: Classifying intent...")
 
-    system_prompt = f"""You are a helpful and proactive smart home assistant.
-Your goal is to understand the user's intent and use the available tools to help them.
+    # A simple prompt to classify the intent.
+    system_prompt = """
+    You are an intent classification system. Your job is to determine if a user's query requires calling a tool or if it's a general conversational query.
+    The user has access to tools for controlling home devices and getting information like weather, time, or news.
 
-You MUST follow this process strictly:
-1.  **Think**: First, analyze the user's request and explain your reasoning inside a <thinking> tag.
-2.  **Act**: Second, based on your thinking, generate the action inside an <action> tag. The action can be:
-    a) One or more tool calls, formatted as JSON objects inside a ```json ... ``` block. Each JSON object must be on a new line.
-    b) A direct text response to the user if no tool is needed.
+    - If the query is a command, a request for specific data, or implies an action the tools can perform, respond with the single word: 'tool_use'.
+    - If the query is a simple greeting, a question about your identity or capabilities ('who are you'), or general small talk, respond with the single word: 'conversation'.
 
-IMPORTANT: Your final output must be a single block of text. The <thinking> tag must be completely closed before the <action> tag begins. Do not nest tags.
-
-Here are the available tools for you:
-{json.dumps(TOOLS, indent=2)}
-
---- EXAMPLES ---
-
-**Example 1: Intent-based request requiring multiple tools**
-User: I want to sleep
-Assistant:
-<thinking>
-The user wants to sleep. This implies they want a dark and quiet environment. I should turn off all the lights (kitchen, bathroom, room1, room2) and the TV. This requires multiple calls to the `turn_off_device` tool.
-</thinking>
-<action>
-```json
-{{"name": "turn_off_device", "parameters": {{"device_id": "kitchen_lamp"}}}}
-{{"name": "turn_off_device", "parameters": {{"device_id": "bathroom_lamp"}}}}
-{{"name": "turn_off_device", "parameters": {{"device_id": "room1_lamp"}}}}
-{{"name": "turn_off_device", "parameters": {{"device_id": "room2_lamp"}}}}
-{{"name": "turn_off_device", "parameters": {{"device_id": "living_room_tv"}}}}
-&lt;/action>
-
-Example 2: No tool needed
-User: Hello
-Assistant:
-&lt;thinking>
-The user is just saying hello. This is a simple greeting and does not require any tools. I should respond with a friendly greeting.
-&lt;/thinking>
-&lt;action>
-Hello! How can I help you today?
-&lt;/action>
-"""
+    Analyze the user query and provide your classification.
+    """
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ]
 
-    response_content = get_llm_response(json.dumps(messages), preferred_service="togetherai")
-    print(f"--- Raw response from LLM ---\n{response_content}\n--------------------")
+    # We call the LLM without any tools for this classification step.
+    # We use a low temperature for a more predictable classification.
+    response = get_llm_response(messages, preferred_service=preferred_service, temperature=0)
 
-    # --- NEW ROBUST PARSING LOGIC ---
-    thought_match = re.search(r"<thinking>(.*?)</thinking>", response_content, re.DOTALL)
-    if thought_match:
-        print(f"--- Assistant's Thought Process ---\n{thought_match.group(1).strip()}\n---------------------------------")
+    if response and "choices" in response and response["choices"]:
+        intent = response["choices"][0]["message"]["content"].strip().lower()
+        print(f"[Agent Router] Intent classified as: '{intent}'")
+        if "tool_use" in intent:
+            return "tool_use"
+    # Default to conversation if classification is unclear
+    return "conversation"
 
-    # Find content that looks like a tool call, regardless of wrapping tags.
-    # This regex looks for '{"name": ...}' which is the start of our tool calls.
-    json_blobs = re.findall(r'\{\s*"name":\s*".*?"(?:,\s*"parameters":\s*\{.*?\})?\s*\}', response_content, re.DOTALL)
 
-    if json_blobs:
-        tool_results = []
-        for blob in json_blobs:
-            try:
-                tool_call = json.loads(blob)
-                function_name = tool_call.get("name") or tool_call.get("fname")
-                arguments = tool_call.get("parameters", {})
-                if function_name:
-                    result = execute_tool(function_name=function_name, arguments=arguments)
-                    tool_results.append(str(result))
-            except json.JSONDecodeError as e:
-                print(f"--- Warning: Could not parse a JSON blob: {e} ---")
-                print(f"--- Malformed blob: {blob} ---")
-                continue # Skip to the next blob
+def parse_tool_calls_from_content(content: str) -> list:
+    """
+    Parses tool call JSON from a markdown code block in the LLM's text response.
+    This is a fallback for when the API doesn't use the native tool_calls feature correctly.
+    """
+    json_match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+    if not json_match:
+        return None
 
-        if tool_results:
-            return "\n".join(tool_results)
+    json_string = json_match.group(1)
+    try:
+        # The LLM might return a single JSON object or a list of them
+        data = json.loads(json_string)
+        if isinstance(data, list):
+            # If it's a list, assume it's a list of tool calls and return it
+            return data
+        elif isinstance(data, dict):
+            # If it's a single object, wrap it in a list
+            return [data]
+        else:
+            return None
+    except json.JSONDecodeError:
+        print(f"[Agent] Warning: Found a JSON block, but it was malformed: {json_string}")
+        return None
 
-# --- Fallback for text responses if no tools are called ---
-    action_match = re.search(r"<action>(.*?)</action>", response_content, re.DOTALL)
-    if action_match:
-        action_content = action_match.group(1).strip()
-        # If the action content is not JSON, return it as a text response.
-        if not json_blobs:
-            json_wrapper_match = re.search(r"```json\s*(.*?)\s*```", action_content, re.DOTALL)
-            if not json_wrapper_match:
-                return action_content
 
-# Final fallback if parsing fails completely
-    print("--- Warning: Could not parse a clear tool call or text action. Returning raw content. ---")
-    return response_content
+def run_agent(user_message: str, preferred_service: str = "groq"):
+    """
+    Runs the agent using the robust Router pattern with a final summarization instruction.
+    """
+    print(f"\n[Agent] Received query: '{user_message}'")
+    print(f"[Agent] Using service provider: {preferred_service.upper()}")
+
+    intent = _get_intent(user_message, preferred_service)
+
+    if intent == "tool_use":
+        print("[Agent Executor] Intent is 'tool_use'. Proceeding with tool calling logic...")
+        system_prompt = "You are a smart home assistant. First, call the necessary tools to fulfill the user's request based on their query."
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+        tools_schema = get_tools_schema()
+
+        response = get_llm_response(messages, tools=tools_schema, preferred_service=preferred_service)
+        if not response or "choices" not in response or not response[
+            "choices"]: return "Error getting tool call decision."
+
+        response_message = response["choices"][0]["message"]
+        if not response_message.get(
+            "tool_calls"): return "I understand you want me to perform an action, but I couldn't determine which tool to use. Please rephrase."
+
+        tool_calls = response_message.get("tool_calls")
+        messages.append(response_message)
+
+        for tool_call in tool_calls:
+            function_name, function_args = tool_call["function"]["name"], json.loads(tool_call["function"]["arguments"])
+            function_to_call = AVAILABLE_FUNCTIONS.get(function_name)
+            if function_to_call:
+                result = function_to_call(**function_args)
+                messages.append({"role": "tool", "tool_call_id": tool_call['id'], "name": function_name,
+                                 "content": json.dumps(result)})
+
+        # <<< بخش کلیدی جدید: افزودن دستورالعمل نهایی برای تولید خلاصه >>>
+        print("[Agent Summarizer] Adding final instruction for a comprehensive response...")
+        final_instruction = """
+        You have successfully executed all required tools and their results have been provided.
+        Now, formulate a single, cohesive, natural-language response to the user.
+        Your response MUST address all parts of the user's original query, including both confirming the actions you took AND answering any conversational questions.
+        Synthesize all information into a friendly and complete answer.
+        """
+        messages.append({"role": "user", "content": final_instruction})
+
+        # --- فراخوانی نهایی برای تولید خلاصه ---
+        print("[Agent Summarizer] Generating final response...")
+        final_response = get_llm_response(messages, preferred_service=preferred_service)  # No tools are passed here
+        if not final_response or "choices" not in final_response or not final_response[
+            "choices"]: return "Tasks executed, but summary failed."
+        return final_response["choices"][0]["message"]["content"]
+
+    else:  # intent == "conversation"
+        print("[Agent Executor] Intent is 'conversation'. Proceeding with conversational logic...")
+        system_prompt = "You are a friendly and helpful smart home assistant. Keep your answers concise and polite."
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+
+        response = get_llm_response(messages, preferred_service=preferred_service)
+        if not response or "choices" not in response or not response[
+            "choices"]: return "I'm having trouble thinking of a response right now."
+        return response["choices"][0]["message"]["content"]
+
+
+# def run_agent(user_message: str, preferred_service: str = "groq"):  # I've set groq as default as it's often more stable
+#     """
+#     Runs the agent using the new Router architecture.
+#     """
+#
+#     # Step 1: Classify intent using the new router function.
+#     intent = _get_intent(user_message, preferred_service)
+#
+#     # Step 2: Execute the appropriate logic based on the intent.
+#     if intent == "tool_use":
+#         print("[Agent Executor] Intent is 'tool_use'. Proceeding with your proven tool-calling logic...")
+#         # This part is YOUR existing, well-tested code for tool calling.
+#         # I have just wrapped it inside this if-statement.
+#
+#         system_prompt = f"""
+#         You are a helpful and proactive smart home assistant. Your goal is to use the provided tools to fulfill the user's requests.
+#         **Primary Method**: Use the `tool_calls` feature to call tools.
+#         **Fallback Method**: If for any reason you cannot use the `tool_calls` feature, you MUST respond with a JSON object inside a ```json markdown block.
+#         The JSON should be a list of tool call objects. Each object must have a `name` and an `arguments` key.
+#         Example of a fallback response:
+#         ```json
+#         [
+#             {{ "name": "call_turn_on_device", "arguments": {{"device_id": "room1_lamp"}} }}
+#         ]
+#         ```
+#         """
+#         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+#         tools_schema = get_tools_schema()
+#         response = get_llm_response(messages, tools=tools_schema, preferred_service=preferred_service)
+#
+#         if not response or "choices" not in response or not response["choices"]:
+#             return "Sorry, I couldn't get a valid response from the assistant's brain."
+#
+#         response_message = response["choices"][0]["message"]
+#         tool_calls = response_message.get("tool_calls")
+#
+#         if not tool_calls:
+#             content = response_message.get("content", "")
+#             parsed_calls = parse_tool_calls_from_content(content)
+#             if parsed_calls:
+#                 tool_calls = [{"type": "function", "function": call} for call in parsed_calls]
+#
+#         if tool_calls:
+#             all_results = []
+#             for tool_call in tool_calls:
+#                 function_name = tool_call["function"]["name"]
+#                 function_args = tool_call["function"]["arguments"]
+#                 if isinstance(function_args, str):
+#                     try:
+#                         function_args = json.loads(function_args)
+#                     except json.JSONDecodeError:
+#                         all_results.append(
+#                             {function_name: {"success": False, "error": f"Invalid JSON args: {function_args}"}})
+#                         continue
+#                 function_to_call = AVAILABLE_FUNCTIONS.get(function_name)
+#                 if function_to_call:
+#                     try:
+#                         result = function_to_call(**function_args)
+#                         all_results.append({function_name: result})
+#                     except Exception as e:
+#                         all_results.append({function_name: {"success": False, "error": str(e)}})
+#                 else:
+#                     all_results.append(
+#                         {function_name: {"success": False, "error": f"Unknown function '{function_name}'"}})
+#             return all_results
+#         else:
+#             return response_message.get("content", "I couldn't process the tool request.")
+#
+#     else:  # intent == "conversation"
+#         print("[Agent Executor] Intent is 'conversation'. Proceeding with conversational logic...")
+#         # This part handles conversational queries by calling the LLM WITHOUT tools.
+#         system_prompt = "You are a friendly and helpful smart home assistant. Keep your answers concise and polite."
+#         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+#
+#         response = get_llm_response(messages, preferred_service=preferred_service)  # Note: No 'tools' parameter is sent
+#
+#         if not response or "choices" not in response or not response["choices"]:
+#             return "I'm having trouble thinking of a response right now."
+#         return response["choices"][0]["message"]["content"]
+
+
 if __name__ == "__main__":
-    print("Testing the agent with Chain of Thought...")
-
-    # print("\n--- Test 1: Intent 'I want to sleep.' ---")
-    # print(f"Agent Response: {run_agent('I want to sleep.')}")
-    print(f"Agent Response: {run_agent('I want go out.')}")
-
-    # print("\n--- Test 2: Intent 'My favorite movie is about to start.' ---")
-    # print(f"Agent Response: {run_agent('My favorite movie is about to start.')}")
-
-    # print("\n--- Test 3: Direct command 'What time is it?' ---")
-    # print(f"Agent Response: {run_agent('What time is it?')}")
-
-    # print("\n--- Test 4: Simple conversation 'Hello' ---")
-    # print(f"Agent Response: {run_agent('Hello, who are you')}")
-
-    # print(f"Agent Response: {run_agent('''What is today's date?''')}")
-
-    # print("\n--- Test 3: Asking about weather ---")
-    # print(f"Agent Response: {run_agent('What is the weather like in Isfahan?')}")
-
-
-    # print(f"Agent Response: {run_agent('Turn off the TV please?')}")
-
-    # print(f"Agent Response: {run_agent('Turn off room 1 lamp please?')}")
-
-    # print("\n--- Test 5: Complex request with two commands ---")
-    # print(f"Agent Response: {run_agent('Turn on the light in room 1 and tell me the weather in Tehran and what time is it?.')}")
+    print("--- Starting Agent Test ---")
+    print("--- Starting Agent Test ---")
+    # response1 = run_agent("Turn on the lamp in room 1")
+    # response1 = run_agent("Turn on all ac units")
+    # response1 = run_agent("Hello how are you?")
+    # response1 = run_agent("What is today's date?")
+    response1 = run_agent("turn on all lamps and who are you?")
+    # response1 = run_agent("What is the weather like in Isfahan?")
+    # response1 = run_agent("Turn on the light in room 1 and tell me the weather in Tehran and what time is it?")
+    # response1 = run_agent("I want to sleep.")
+    # response1 = run_agent("I want to sleep. I need a dark and quiet environment.")
+    # response1 = run_agent("Tell me some news from china.")
+    # response1 = run_agent("I want see football on tv")
+    # response1 = run_agent("What is today's date?")
+    print("\n--- Final Response 1 ---\n", response1)
